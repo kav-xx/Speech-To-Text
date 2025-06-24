@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Speech-to-Text</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600&display=swap');
+    * { box-sizing: border-box; }
+
+    body {
+      background: linear-gradient(135deg, #667eea, lightblue);
+      font-family: 'Poppins', sans-serif;
+      color: white;
+      margin: 0;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      margin-top: 2rem;
+      font-size: 2.5rem;
+      text-shadow: 0 0 10px rgba(255,255,255,0.7);
+    }
+
+    #status {
+      font-size: 1.2rem;
+      margin-bottom: 1rem;
+      height: 28px;
+      text-align: center;
+    }
+
+    #transcript {
+      font-weight: 700;
+      font-size: 1.2rem;
+      color: #ffd700;
+      text-shadow: 0 0 8px #ffd700aa;
+      white-space: pre-wrap;
+      border: 2px solid #ffd700;
+      border-radius: 12px;
+      padding: 1rem;
+      width: 80%;
+      max-width: 800px;
+      background: rgba(0,0,0,0.3);
+      overflow-y: auto;
+      max-height: 300px;
+      margin-bottom: 1.5rem;
+    }
+
+    .wave-container {
+      display: none;
+      margin-bottom: 1.5rem;
+      height: 60px;
+      width: 160px;
+      justify-content: center;
+      position: relative;
+    }
+
+    .wave {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      width: 20px;
+      height: 60px;
+      background: #ffd700;
+      opacity: 0.6;
+      transform-origin: bottom center;
+      border-radius: 10px 10px 0 0;
+      animation: waveAnim 1.2s ease-in-out infinite;
+    }
+
+    .wave:nth-child(1) { margin-left: -60px; animation-delay: 0s; }
+    .wave:nth-child(2) { margin-left: -30px; animation-delay: 0.15s; }
+    .wave:nth-child(3) { margin-left: 0; animation-delay: 0.3s; }
+    .wave:nth-child(4) { margin-left: 30px; animation-delay: 0.45s; }
+    .wave:nth-child(5) { margin-left: 60px; animation-delay: 0.6s; }
+
+    @keyframes waveAnim {
+      0%, 100% { transform: scaleY(0.4); opacity: 0.6; }
+      50% { transform: scaleY(1); opacity: 1; }
+    }
+
+    button {
+      background: linear-gradient(45deg, #4b6cb7, #182848);
+      border: none;
+      color: white;
+      padding: 1rem 2.5rem;
+      font-size: 1.1rem;
+      border-radius: 40px;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(75,108,183,0.7);
+      transition: background 0.4s ease, box-shadow 0.4s ease;
+      user-select: none;
+      outline: none;
+      margin: 0.5rem;
+    }
+
+    button:hover, button:focus {
+      background: linear-gradient(45deg, #3a539b, #0f1c35);
+      box-shadow: 0 12px 30px rgba(58,83,155,0.9);
+    }
+
+    button:active {
+      transform: scale(0.97);
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 2rem;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Speech-to-Text</h1>
+  <div id="status">Click the button to start listening</div>
+  <div id="transcript" contenteditable="true"></div>
+
+  <div class="wave-container">
+    <div class="wave"></div><div class="wave"></div><div class="wave"></div><div class="wave"></div><div class="wave"></div>
+  </div>
+
+  <div class="controls">
+    <button id="toggle-listen">🎤 Start Listening</button>
+    <button id="undo">↩️ Undo</button>
+    <button id="redo">↪️ Redo</button>
+    <button id="download">⬇️ Download</button>
+    <button id="clear">🗑️ Clear</button>
+  </div>
+
+  <script>
+    let isListening = false;
+    let recognition;
+    let undoStack = [];
+    let redoStack = [];
+    let silenceTimer;
+
+    const statusDiv = document.getElementById('status');
+    const transcriptDiv = document.getElementById('transcript');
+    const waveContainer = document.querySelector('.wave-container');
+    const listenButton = document.getElementById('toggle-listen');
+    const undoBtn = document.getElementById('undo');
+    const redoBtn = document.getElementById('redo');
+    const downloadBtn = document.getElementById('download');
+    const clearBtn = document.getElementById('clear');
+
+    function saveState() {
+      undoStack.push(transcriptDiv.textContent);
+      redoStack = [];
+    }
+
+    function restoreState(stackFrom, stackTo) {
+      if (stackFrom.length > 0) {
+        stackTo.push(transcriptDiv.textContent);
+        const prevState = stackFrom.pop();
+        transcriptDiv.textContent = prevState;
+      }
+    }
+
+    undoBtn.onclick = () => restoreState(undoStack, redoStack);
+    redoBtn.onclick = () => restoreState(redoStack, undoStack);
+    clearBtn.onclick = () => {
+      saveState();
+      transcriptDiv.textContent = '';
+    };
+
+    downloadBtn.onclick = () => {
+      const content = transcriptDiv.textContent;
+      fetch('/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ corrected_text: content })
+      })
+      .then(res => res.json())
+      .then(data => {
+        const blob = new Blob([data.content], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'transcript.txt';
+        a.click();
+        window.URL.revokeObjectURL(url);
+      });
+    };
+
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        isListening = true;
+        statusDiv.textContent = 'Listening...';
+        listenButton.textContent = '🛑 Stop Listening';
+        waveContainer.style.display = 'flex';
+        startSilenceTimer();
+      };
+
+      recognition.onresult = (event) => {
+        const rawTranscript = event.results[event.resultIndex][0].transcript;
+        resetSilenceTimer();
+
+        statusDiv.textContent = 'Processing...';
+        fetch('/save_transcript', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: rawTranscript })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.processed_text) {
+            saveState();
+            transcriptDiv.textContent += data.processed_text + "\n\n";
+          } else {
+            statusDiv.textContent = 'Error: Empty processed text';
+          }
+          statusDiv.textContent = 'Listening...';
+        })
+        .catch(() => {
+          statusDiv.textContent = 'Error processing transcript';
+        });
+      };
+
+      recognition.onerror = () => {
+        statusDiv.textContent = 'Error during recognition';
+        waveContainer.style.display = 'none';
+        listenButton.textContent = '🎤 Start Listening';
+        isListening = false;
+        clearSilenceTimer();
+      };
+
+      recognition.onend = () => {
+        isListening = false;
+        waveContainer.style.display = 'none';
+        statusDiv.textContent = 'Click the button to start listening';
+        listenButton.textContent = '🎤 Start Listening';
+        clearSilenceTimer();
+      };
+
+      listenButton.onclick = () => {
+        if (!isListening) {
+          navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(() => recognition.start())
+            .catch(() => {
+              statusDiv.textContent = 'Microphone access denied.';
+            });
+        } else {
+          recognition.stop();
+          statusDiv.textContent = 'Stopped listening';
+          listenButton.textContent = '🎤 Start Listening';
+          clearSilenceTimer();
+        }
+      };
+
+      function startSilenceTimer() {
+        clearSilenceTimer();
+        silenceTimer = setTimeout(() => {
+          recognition.stop();
+          statusDiv.textContent = 'Stopped due to 30s silence';
+          listenButton.textContent = '🎤 Start Listening';
+        }, 30000);
+      }
+
+      function resetSilenceTimer() {
+        startSilenceTimer();
+      }
+
+      function clearSilenceTimer() {
+        if (silenceTimer) clearTimeout(silenceTimer);
+      }
+
+    } else {
+      statusDiv.textContent = 'SpeechRecognition is not supported in this browser.';
+      listenButton.disabled = true;
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        undoBtn.click();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        redoBtn.click();
+      }
+    });
+  </script>
+</body>
+</html>
